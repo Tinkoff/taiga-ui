@@ -11,6 +11,7 @@ import {
     ViewChild,
 } from '@angular/core';
 import {takeUntilDestroyed, toSignal} from '@angular/core/rxjs-interop';
+import {ResizeObserverService} from '@ng-web-apis/resize-observer';
 import {tuiTypedFromEvent} from '@taiga-ui/cdk/observables';
 import {tuiInjectElement, tuiIsCurrentTarget} from '@taiga-ui/cdk/utils/dom';
 import {
@@ -37,6 +38,9 @@ import {TUI_LINE_CLAMP_OPTIONS} from './line-clamp.options';
 import {TuiLineClampBox} from './line-clamp-box.component';
 import {TuiLineClampPositionDirective} from './line-clamp-position.directive';
 
+// 4px buffer for IE/Edge incorrectly rounding scrollHeight
+const BUFFER = 4;
+
 @Component({
     standalone: true,
     selector: 'tui-line-clamp',
@@ -45,6 +49,7 @@ import {TuiLineClampPositionDirective} from './line-clamp-position.directive';
     styleUrls: ['./line-clamp.style.less'],
     changeDetection: ChangeDetectionStrategy.OnPush,
     providers: [
+        ResizeObserverService,
         {
             provide: TUI_HINT_COMPONENT,
             useValue: TuiLineClampBox,
@@ -54,7 +59,7 @@ import {TuiLineClampPositionDirective} from './line-clamp-position.directive';
         '[style.height.px]': 'height()',
         '[style.max-height.px]': 'maxHeight()',
         '[class._initialized]': 'initialized()',
-        '(transitionend)': 'updateView()',
+        '(transitionend)': 'updateView(); finishTransition()',
         '(mouseenter)': 'updateView()',
         '(resize)': 'updateView()',
     },
@@ -68,10 +73,10 @@ export class TuiLineClamp implements DoCheck, AfterViewInit {
     private readonly cd = inject(ChangeDetectorRef);
     private readonly linesLimit$ = new BehaviorSubject(1);
     private readonly isOverflown$ = new Subject<boolean>();
+    protected transitionend = false;
     protected initialized = signal(false);
     protected maxHeight = signal(0);
     protected height = signal(0);
-
     protected lineClamp = toSignal(
         this.linesLimit$.pipe(
             startWith(1),
@@ -106,7 +111,10 @@ export class TuiLineClamp implements DoCheck, AfterViewInit {
 
     public ngDoCheck(): void {
         this.update();
-        this.isOverflown$.next(this.overflown);
+
+        if (this.transitionend) {
+            this.isOverflown$.next(this.overflown);
+        }
     }
 
     public ngAfterViewInit(): void {
@@ -122,7 +130,7 @@ export class TuiLineClamp implements DoCheck, AfterViewInit {
         const {clientHeight, clientWidth} = this.el;
 
         // 4px buffer for IE/Edge incorrectly rounding scrollHeight
-        return scrollHeight - clientHeight > 4 || scrollWidth - clientWidth > 0;
+        return scrollHeight - clientHeight > BUFFER || scrollWidth - clientWidth > 0;
     }
 
     protected get computedContent(): PolymorpheusContent {
@@ -133,9 +141,13 @@ export class TuiLineClamp implements DoCheck, AfterViewInit {
         this.cd.detectChanges();
     }
 
+    protected finishTransition(): void {
+        this.transitionend = true;
+    }
+
     private update(): void {
         if (this.outlet) {
-            this.height.set(this.outlet.nativeElement.scrollHeight + 4);
+            this.height.set(this.outlet.nativeElement.scrollHeight + BUFFER);
         }
 
         this.maxHeight.set(this.lineHeight * this.linesLimit$.value);
